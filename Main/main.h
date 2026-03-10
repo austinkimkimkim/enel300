@@ -91,6 +91,7 @@ void Error_Handler(void);
 #define TRIG_PORT           GPIOB
 
 #define ENABLE_METAL_DETECTION 0
+#define ENABLE_OBJ_DETECTION 1
 
 /* USER CODE END Private defines */
 
