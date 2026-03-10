@@ -13,7 +13,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
+#include <inttypes.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -23,7 +24,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define F_CLK  84000000UL
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -33,6 +34,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 
 UART_HandleTypeDef huart2;
 
@@ -45,6 +47,11 @@ volatile uint32_t storedTimeDelta = 0;
 volatile uint32_t interruptCount  = 0;
 
 uint32_t lastPrintTime = 0;
+
+volatile uint16_t echo_rise_time = 0;
+volatile uint16_t echo_pulse_us = 0;
+volatile uint8_t echo_waiting_for_fall = 0;
+volatile uint8_t echo_done = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -52,6 +59,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -94,6 +102,13 @@ void stopTone(void)
   HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
 }
 
+void DelayUS(uint16_t us)
+{
+    uint16_t start = __HAL_TIM_GET_COUNTER(&htim3);
+    while ((uint16_t)(__HAL_TIM_GET_COUNTER(&htim3) - start) < us) {}
+}
+
+
 /* USER CODE END 0 */
 
 /**
@@ -127,8 +142,11 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   MX_TIM2_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   DWT_Init();
+  HAL_TIM_Base_Start(&htim3);
+
 
 
   /* USER CODE END 2 */
@@ -137,36 +155,61 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    int32_t diff = (int32_t)((int32_t)(storedTimeDelta - signalTimeDelta) * SENSITIVITY);
+	if (ENABLE_METAL_DETECTION == 1) {
+		int32_t diff = (int32_t)((int32_t)(storedTimeDelta - signalTimeDelta) * SENSITIVITY);
 
-    // Drive LED on PA6
-    HAL_GPIO_WritePin(LED_PORT, LED_PIN,
-      diff > LED_THRESHOLD ? GPIO_PIN_SET : GPIO_PIN_RESET);
+		    // Drive LED on PA6
+		    HAL_GPIO_WritePin(LED_PORT, LED_PIN,
+		      diff > LED_THRESHOLD ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
-    // Serial print every SERIAL_INTERVAL_MS
-    uint32_t now = HAL_GetTick();
-    if (now - lastPrintTime >= SERIAL_INTERVAL_MS)
-    {
-      lastPrintTime = now;
-      if (storedTimeDelta == 0)
-      {
-        printf("Calibrating... Interrupts: %lu\r\n", interruptCount);
-      }
-      else
-      {
-        printf("Baseline: %lu us  |  Current: %lu us  |  Diff: %ld  |  Metal: %s\r\n",
-          storedTimeDelta,
-          signalTimeDelta,
-          diff,
-          diff > LED_THRESHOLD ? "YES" : "no");
+		    // Serial print every SERIAL_INTERVAL_MS
+		    uint32_t now = HAL_GetTick();
+		    if (now - lastPrintTime >= SERIAL_INTERVAL_MS)
+		    {
+		      lastPrintTime = now;
+		      if (storedTimeDelta == 0)
+		      {
+		        printf("Calibrating... Interrupts: %lu\r\n", interruptCount);
+		      }
+		      else
+		      {
+		        printf("Baseline: %lu us  |  Current: %lu us  |  Diff: %ld  |  Metal: %s\r\n",
+		          storedTimeDelta,
+		          signalTimeDelta,
+		          diff,
+		          diff > LED_THRESHOLD ? "YES" : "no");
 
-        if (diff > LED_THRESHOLD) {
-        	playTone(261);
-        } else {
-        	stopTone();
-        }
-      }
-    }
+		        if (diff > LED_THRESHOLD) {
+		        	playTone(261);
+		        } else {
+		        	stopTone();
+		        }
+		      }
+		    }
+	}
+
+    HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_RESET);
+    DelayUS(2);
+    HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_SET);
+    DelayUS(10);
+	HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_RESET);
+
+	uint32_t t0 = HAL_GetTick();
+	while (!echo_done && (HAL_GetTick() - t0 < 100));
+
+	if (echo_pulse_us < 40000) {
+		float distance = echo_pulse_us * 11.5 / 610.0;
+		printf("Pulse = %.2f cm\r\n", distance);
+	}
+
+
+	HAL_Delay(50);
+
+
+
+
+
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -281,6 +324,51 @@ static void MX_TIM2_Init(void)
 }
 
 /**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 83;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 65535;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -335,6 +423,9 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : B1_Pin */
@@ -343,9 +434,9 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PA0 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  /*Configure GPIO pin : PA1 */
+  GPIO_InitStruct.Pin = GPIO_PIN_1;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
@@ -355,6 +446,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB1 */
+  GPIO_InitStruct.Pin = GPIO_PIN_1;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB15 */
   GPIO_InitStruct.Pin = GPIO_PIN_15;
@@ -386,10 +484,14 @@ static void MX_GPIO_Init(void)
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
   // Enable NVIC interrupts
-   HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
-   HAL_NVIC_EnableIRQ(EXTI0_IRQn);
-   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 1, 0);
-   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI1_IRQn, 1, 0);
+  HAL_NVIC_EnableIRQ(EXTI1_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 2, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
   /* USER CODE END MX_GPIO_Init_2 */
 }
@@ -422,8 +524,24 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
       }
     }
   }
-}
 
+
+  if (GPIO_Pin == ECHO_PIN)   // PA1 = ECHO
+  {
+
+	  if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_1) == GPIO_PIN_SET)
+	  {
+		  echo_rise_time = TIM3->CNT;
+		  echo_waiting_for_fall = 1;
+	  }
+	  else if (echo_waiting_for_fall)
+	  {
+		  echo_pulse_us = (uint16_t)(TIM3->CNT - echo_rise_time);
+		  echo_waiting_for_fall = 0;
+		  echo_done = 1;
+	  }
+  }
+}
 
 /* USER CODE END 4 */
 

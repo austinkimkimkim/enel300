@@ -85,6 +85,13 @@ void Error_Handler(void);
 #define OSCILLATOR_PORT     GPIOA
 #define LED_PIN             GPIO_PIN_7
 #define LED_PORT            GPIOC
+#define ECHO_PIN 			GPIO_PIN_1
+#define ECHO_PORT           GPIOA
+#define TRIG_PIN 			GPIO_PIN_1
+#define TRIG_PORT           GPIOB
+
+#define ENABLE_METAL_DETECTION 0
+
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus
