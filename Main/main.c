@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include "i2c_lcd.h"
+#include <stdlib.h>
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -39,7 +41,9 @@ I2C_HandleTypeDef hi2c1;
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 
+UART_HandleTypeDef huart4;
 UART_HandleTypeDef huart2;
+UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
 I2C_LCD_HandleTypeDef lcd1;
@@ -57,6 +61,15 @@ volatile uint16_t echo_pulse_us = 0;
 volatile uint8_t echo_waiting_for_fall = 0;
 volatile uint8_t echo_done = 0;
 
+char buffer[24];
+char rx_line[24];
+uint8_t rx_byte;
+volatile uint8_t buffer_idx = 0;
+volatile uint8_t line_ready = 0;
+
+int16_t bt_motorL = 0;
+int16_t bt_motorR = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -66,6 +79,8 @@ static void MX_USART2_UART_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_I2C1_Init(void);
+static void MX_UART4_Init(void);
+static void MX_USART3_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -121,6 +136,28 @@ void DelayUS(uint16_t us)
 }
 
 
+// MAKE SURE TO RECONFIG DELAY FUNCTION ABOVE TO A DIFFERENT TIM CHANNEL; WE ARE CHANGING ARR + CRR BELOW
+void tim3PwmGen(void)
+{
+	// PSC = 83, F_CLK = 84,000,000
+
+	uint32_t arr = (84000000/ (84*20000))-1;
+	htim3.Instance ->ARR = arr;
+	htim3.Instance->CCR1=arr/2;
+	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+
+	HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
+
+
+	HAL_GPIO_WritePin(NSLEEP_PORT, NSLEEP_PIN, GPIO_PIN_SET);
+}
+
+void stopTim3(void)
+{
+  HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
+}
+
+
 /* USER CODE END 0 */
 
 /**
@@ -156,11 +193,13 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM3_Init();
   MX_I2C1_Init();
+  MX_UART4_Init();
+  MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
 
 
   DWT_Init();
-  HAL_TIM_Base_Start(&htim3);
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 
   lcd1.hi2c = &hi2c1;
   lcd1.address = 0x4E;
@@ -169,6 +208,8 @@ int main(void)
   HAL_Delay(20);
   lcd_clear(&lcd1);
   HAL_Delay(5);
+
+  HAL_UART_Receive_IT(&huart3, &rx_byte, 1);
 
 
 
@@ -227,9 +268,9 @@ int main(void)
 			HAL_Delay(100);
 			char lcd_buf[17];
 			float distance = echo_pulse_us * 11.5 / 610.0;
-			printf("Distance = %.2f cm\r\n", distance);
 
 			snprintf(lcd_buf, sizeof(lcd_buf), "Distance = %.2f cm", distance);
+			printf("Pulse: " PRIu32 "\r\n", echo_pulse_us);
 
 			printf(lcd_buf);
 			lcd_puts(&lcd1, lcd_buf);
@@ -238,6 +279,46 @@ int main(void)
 		HAL_Delay(100);
 	}
 
+	if (TOGGLE_LED == 1) {
+		HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+		HAL_Delay(500);
+	}
+
+	if (ENABLE_MOTOR_SIGNAL == 1) {
+		HAL_Delay(1000);
+		printf("Running tim3 pwm gen.\r\n");
+		tim3PwmGen();
+	}
+
+	if (ENABLE_BT == 1) {
+		if (line_ready)
+		{
+		    char local[24];
+		    int l, r;
+
+		    __disable_irq();
+		    strncpy(local, rx_line, sizeof(local));
+		    local[sizeof(local) - 1] = '\0';
+		    line_ready = 0;
+		    __enable_irq();
+
+		    printf("RX: %s\r\n", local);
+
+		    if (sscanf(local, "L:%d,R:%d", &l, &r) == 2)
+		    {
+		        bt_motorL = (int16_t)l;
+		        bt_motorR = (int16_t)r;
+
+		        printf("Parsed -> L:%d R:%d\r\n", bt_motorL, bt_motorR);
+
+		        // use bt_motorL and bt_motorR here
+		    }
+		    else
+		    {
+		        printf("Bad packet: %s\r\n", local);
+		    }
+		}
+	}
 
 
 
@@ -402,6 +483,7 @@ static void MX_TIM3_Init(void)
 
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
 
   /* USER CODE BEGIN TIM3_Init 1 */
 
@@ -421,15 +503,69 @@ static void MX_TIM3_Init(void)
   {
     Error_Handler();
   }
+  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
+  {
+    Error_Handler();
+  }
   /* USER CODE BEGIN TIM3_Init 2 */
 
   /* USER CODE END TIM3_Init 2 */
+  HAL_TIM_MspPostInit(&htim3);
+
+}
+
+/**
+  * @brief UART4 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_UART4_Init(void)
+{
+
+  /* USER CODE BEGIN UART4_Init 0 */
+
+  /* USER CODE END UART4_Init 0 */
+
+  /* USER CODE BEGIN UART4_Init 1 */
+
+  /* USER CODE END UART4_Init 1 */
+  huart4.Instance = UART4;
+  huart4.Init.BaudRate = 115200;
+  huart4.Init.WordLength = UART_WORDLENGTH_8B;
+  huart4.Init.StopBits = UART_STOPBITS_1;
+  huart4.Init.Parity = UART_PARITY_NONE;
+  huart4.Init.Mode = UART_MODE_TX_RX;
+  huart4.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart4.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN UART4_Init 2 */
+
+  /* USER CODE END UART4_Init 2 */
 
 }
 
@@ -467,6 +603,39 @@ static void MX_USART2_UART_Init(void)
 }
 
 /**
+  * @brief USART3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART3_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART3_Init 0 */
+
+  /* USER CODE END USART3_Init 0 */
+
+  /* USER CODE BEGIN USART3_Init 1 */
+
+  /* USER CODE END USART3_Init 1 */
+  huart3.Instance = USART3;
+  huart3.Init.BaudRate = 9600;
+  huart3.Init.WordLength = UART_WORDLENGTH_8B;
+  huart3.Init.StopBits = UART_STOPBITS_1;
+  huart3.Init.Parity = UART_PARITY_NONE;
+  huart3.Init.Mode = UART_MODE_TX_RX;
+  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART3_Init 2 */
+
+  /* USER CODE END USART3_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -486,7 +655,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3
-                          |GPIO_PIN_7, GPIO_PIN_RESET);
+                          |GPIO_PIN_7|GPIO_PIN_9, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
@@ -501,9 +670,9 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PC0 PC1 PC2 PC3
-                           PC7 */
+                           PC7 PC9 */
   GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3
-                          |GPIO_PIN_7;
+                          |GPIO_PIN_7|GPIO_PIN_9;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -610,6 +779,44 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	  }
   }
 }
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart == &huart3)
+    {
+        char c = (char)rx_byte;
+
+        if (c == '\r')
+        {
+            // ignore carriage return
+        }
+        else if (c == '\n')
+        {
+            buffer[buffer_idx] = '\0';
+
+            strncpy(rx_line, buffer, sizeof(rx_line));
+            rx_line[sizeof(rx_line) - 1] = '\0';
+
+            buffer_idx = 0;
+            line_ready = 1;
+        }
+        else
+        {
+            if (buffer_idx < sizeof(buffer) - 1)
+            {
+                buffer[buffer_idx++] = c;
+            }
+            else
+            {
+                // overflow protection: reset buffer
+                buffer_idx = 0;
+            }
+        }
+
+        HAL_UART_Receive_IT(&huart3, &rx_byte, 1);
+    }
+}
+
 
 /* USER CODE END 4 */
 
