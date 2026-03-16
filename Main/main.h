@@ -89,9 +89,16 @@ void Error_Handler(void);
 #define ECHO_PORT           GPIOA
 #define TRIG_PIN 			GPIO_PIN_1
 #define TRIG_PORT           GPIOB
+#define NSLEEP_PIN			GPIO_PIN_9
+#define NSLEEP_PORT			GPIOC
 
-#define ENABLE_METAL_DETECTION 0
-#define ENABLE_OBJ_DETECTION 1
+
+
+#define ENABLE_METAL_DETECTION 		0
+#define ENABLE_OBJ_DETECTION 		0
+#define TOGGLE_LED 					0
+#define ENABLE_MOTOR_SIGNAL 		0
+#define ENABLE_BT 					1
 
 /* USER CODE END Private defines */
 

@@ -40,6 +40,7 @@ I2C_HandleTypeDef hi2c1;
 
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
+TIM_HandleTypeDef htim4;
 
 UART_HandleTypeDef huart4;
 UART_HandleTypeDef huart2;
@@ -81,6 +82,7 @@ static void MX_TIM3_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_UART4_Init(void);
 static void MX_USART3_UART_Init(void);
+static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -137,26 +139,48 @@ void DelayUS(uint16_t us)
 
 
 // MAKE SURE TO RECONFIG DELAY FUNCTION ABOVE TO A DIFFERENT TIM CHANNEL; WE ARE CHANGING ARR + CRR BELOW
-void tim3PwmGen(void)
+void motor1(int set, float speed)
 {
 	// PSC = 83, F_CLK = 84,000,000
 
 	uint32_t arr = (84000000/ (84*20000))-1;
 	htim3.Instance ->ARR = arr;
-	htim3.Instance->CCR1=arr/2;
+	htim3.Instance->CCR1=arr * speed;
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+	if (set == 0) {
+		HAL_GPIO_WritePin(NSLEEP_PORT, NSLEEP_PIN, GPIO_PIN_SET);
+	} else if (set == 1) {
+		HAL_GPIO_WritePin(NSLEEP_PORT, NSLEEP_PIN, GPIO_PIN_RESET);
+	}
 
-	HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
-
-
-	HAL_GPIO_WritePin(NSLEEP_PORT, NSLEEP_PIN, GPIO_PIN_SET);
 }
 
-void stopTim3(void)
+void stopMotor1(void)
 {
   HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
 }
 
+
+void motor2(int set, float speed)
+{
+	// PSC = 83, F_CLK = 84,000,000
+
+	uint32_t arr = (84000000/ (84*20000))-1;
+	htim4.Instance ->ARR = arr;
+	htim4.Instance->CCR1=arr * speed;
+	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
+	if (set == 0) {
+		HAL_GPIO_WritePin(NSLEEP_PORT, NSLEEP_PIN, GPIO_PIN_SET);
+	} else if (set == 1) {
+		HAL_GPIO_WritePin(NSLEEP_PORT, NSLEEP_PIN, GPIO_PIN_RESET);
+	}
+
+}
+
+void stopMotor2(void)
+{
+  HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_1);
+}
 
 /* USER CODE END 0 */
 
@@ -195,6 +219,7 @@ int main(void)
   MX_I2C1_Init();
   MX_UART4_Init();
   MX_USART3_UART_Init();
+  MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
 
 
@@ -286,8 +311,10 @@ int main(void)
 
 	if (ENABLE_MOTOR_SIGNAL == 1) {
 		HAL_Delay(1000);
-		printf("Running tim3 pwm gen.\r\n");
-		tim3PwmGen();
+		motor1(0, 0.8);
+		motor2(0, 0.8);
+		printf("Running tim3 and tim4 pwm gen.\r\n");
+
 	}
 
 	if (ENABLE_BT == 1) {
@@ -311,6 +338,19 @@ int main(void)
 
 		        printf("Parsed -> L:%d R:%d\r\n", bt_motorL, bt_motorR);
 
+		        printf("%f, %f\r\n", bt_motorL/100.0, bt_motorR/100.0);
+
+		        if (bt_motorL > 0) {
+		        	motor1(0, bt_motorL/100.0);
+		        } else {
+		        	stopMotor1();
+		        }
+
+		        if (bt_motorR > 0) {
+					motor2(0, bt_motorR/100.0);
+				} else {
+					stopMotor2();
+				}
 		        // use bt_motorL and bt_motorR here
 		    }
 		    else
@@ -533,6 +573,69 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 2 */
   HAL_TIM_MspPostInit(&htim3);
+
+}
+
+/**
+  * @brief TIM4 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM4_Init(void)
+{
+
+  /* USER CODE BEGIN TIM4_Init 0 */
+
+  /* USER CODE END TIM4_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM4_Init 1 */
+
+  /* USER CODE END TIM4_Init 1 */
+  htim4.Instance = TIM4;
+  htim4.Init.Prescaler = 83;
+  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim4.Init.Period = 65535;
+  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM4_Init 2 */
+
+  /* USER CODE END TIM4_Init 2 */
+  HAL_TIM_MspPostInit(&htim4);
 
 }
 
