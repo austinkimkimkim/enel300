@@ -139,14 +139,23 @@ void DelayUS(uint16_t us)
 
 
 // MAKE SURE TO RECONFIG DELAY FUNCTION ABOVE TO A DIFFERENT TIM CHANNEL; WE ARE CHANGING ARR + CRR BELOW
-void motor1(int set, float speed)
+void motor1(int set, float speed, int direction)
 {
 	// PSC = 83, F_CLK = 84,000,000
 
 	uint32_t arr = (84000000/ (84*20000))-1;
 	htim3.Instance ->ARR = arr;
-	htim3.Instance->CCR1=arr * speed;
-	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+	printf("%f \r\n", speed);
+	if (direction == 0) {
+		htim3.Instance->CCR1=arr * speed;
+		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
+	} else if (direction == 1) {
+		htim3.Instance->CCR3=arr * speed * -1.0;
+		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
+		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
+	}
+
 	if (set == 0) {
 		HAL_GPIO_WritePin(NSLEEP_PORT, NSLEEP_PIN, GPIO_PIN_SET);
 	} else if (set == 1) {
@@ -158,28 +167,40 @@ void motor1(int set, float speed)
 void stopMotor1(void)
 {
   HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
 }
 
 
-void motor2(int set, float speed)
+void motor2(int set, float speed, int direction)
 {
 	// PSC = 83, F_CLK = 84,000,000
 
 	uint32_t arr = (84000000/ (84*20000))-1;
 	htim4.Instance ->ARR = arr;
-	htim4.Instance->CCR1=arr * speed;
-	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
+
+	if (direction == 0) {
+		htim4.Instance->CCR1=arr * speed;
+		HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
+		HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_2);
+	} else if (direction == 1) {
+		printf("hello 2");
+		htim4.Instance->CCR2=arr * speed * -1.0;
+		HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
+		HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_1);
+	}
+
+
 	if (set == 0) {
 		HAL_GPIO_WritePin(NSLEEP_PORT, NSLEEP_PIN, GPIO_PIN_SET);
 	} else if (set == 1) {
 		HAL_GPIO_WritePin(NSLEEP_PORT, NSLEEP_PIN, GPIO_PIN_RESET);
 	}
-
 }
 
 void stopMotor2(void)
 {
   HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_2);
 }
 
 /* USER CODE END 0 */
@@ -311,8 +332,6 @@ int main(void)
 
 	if (ENABLE_MOTOR_SIGNAL == 1) {
 		HAL_Delay(1000);
-		motor1(0, 0.8);
-		motor2(0, 0.8);
 		printf("Running tim3 and tim4 pwm gen.\r\n");
 
 	}
@@ -341,14 +360,19 @@ int main(void)
 		        printf("%f, %f\r\n", bt_motorL/100.0, bt_motorR/100.0);
 
 		        if (bt_motorL > 0) {
-		        	motor1(0, bt_motorL/100.0);
+		        	motor1(0, bt_motorL/100.0, 0);
+		        } else if (bt_motorL < 0) {
+		        	motor1(0, bt_motorL/100.0, 1);
 		        } else {
 		        	stopMotor1();
 		        }
 
 		        if (bt_motorR > 0) {
-					motor2(0, bt_motorR/100.0);
-				} else {
+					motor2(0, bt_motorR/100.0, 0);
+				}
+		        else if (bt_motorR < 0) {
+		        	motor2(0, bt_motorR/100.0, 1);
+		        } else {
 					stopMotor2();
 				}
 		        // use bt_motorL and bt_motorR here
