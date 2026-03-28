@@ -15,7 +15,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <inttypes.h>
-#include "i2c_lcd.h"
+//#include "i2c_lcd.h"
 #include <stdlib.h>
 #include <string.h>
 /* USER CODE END Includes */
@@ -36,8 +36,6 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-I2C_HandleTypeDef hi2c1;
-
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
@@ -47,7 +45,7 @@ UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
-I2C_LCD_HandleTypeDef lcd1;
+// I2C_LCD_HandleTypeDef lcd1;
 volatile uint32_t cycleCount      = 0;
 volatile uint32_t lastSignalTime  = 0;
 volatile uint32_t signalTimeDelta = 0;
@@ -70,6 +68,8 @@ volatile uint8_t line_ready = 0;
 
 int16_t bt_motorL = 0;
 int16_t bt_motorR = 0;
+int16_t bt_light = 0;
+
 
 /* USER CODE END PV */
 
@@ -79,7 +79,6 @@ static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
-static void MX_I2C1_Init(void);
 static void MX_UART4_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_TIM4_Init(void);
@@ -89,6 +88,11 @@ static void MX_TIM4_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+
+// 				METAL DETECTION FUNCTIONS
+//---------------------------------------------------------
+
 
 // DWT microsecond timer - equivalent to Arduino micros()
 static void DWT_Init(void)
@@ -103,11 +107,25 @@ static uint32_t micros(void)
   return DWT->CYCCNT / (SystemCoreClock / 1000000);
 }
 
-void init_lcds(void) {
-    lcd1.hi2c = &hi2c1;     // hi2c1 is your I2C handler
-    lcd1.address = 0x4E;    // I2C address for the first LCD
-    lcd_init(&lcd1);        // Initialize the first LCD
+
+// 				OBJECT DETECTION FUNCTIONS
+//---------------------------------------------------------
+
+//void init_lcds(void) {
+//    lcd1.hi2c = &hi2c1;     // hi2c1 is your I2C handler
+//    lcd1.address = 0x4E;    // I2C address for the first LCD
+//    lcd_init(&lcd1);        // Initialize the first LCD
+//}
+
+void DelayUS(uint16_t us)
+{
+    uint16_t start = __HAL_TIM_GET_COUNTER(&htim3);
+    while ((uint16_t)(__HAL_TIM_GET_COUNTER(&htim3) - start) < us) {}
 }
+
+// 				DEBUGGING FUNCTIONS
+//---------------------------------------------------------
+
 
 // Redirect printf to UART2
 int __io_putchar(int ch)
@@ -116,6 +134,10 @@ int __io_putchar(int ch)
   return ch;
 }
 
+// 				NOISE GEN FUNCTIONS
+//---------------------------------------------------------
+
+// PA15; Noise generation
 void playTone(uint32_t frequency)
 {
 	// PSC = 83, F_CLK = 84,000,000
@@ -131,11 +153,20 @@ void stopTone(void)
   HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
 }
 
-void DelayUS(uint16_t us)
+
+
+// 				BLUETOOTH FUNCTIONS
+//---------------------------------------------------------
+
+void Send_Value(int16_t value)
 {
-    uint16_t start = __HAL_TIM_GET_COUNTER(&htim3);
-    while ((uint16_t)(__HAL_TIM_GET_COUNTER(&htim3) - start) < us) {}
+  char buf[8];
+  int len = snprintf(buf, sizeof(buf), "%d\n", value);
+  HAL_UART_Transmit(&huart3, (uint8_t *)buf, len, HAL_MAX_DELAY);
 }
+
+
+
 
 
 // MAKE SURE TO RECONFIG DELAY FUNCTION ABOVE TO A DIFFERENT TIM CHANNEL; WE ARE CHANGING ARR + CRR BELOW
@@ -179,14 +210,13 @@ void motor2(int set, float speed, int direction)
 	htim4.Instance ->ARR = arr;
 
 	if (direction == 0) {
-		htim4.Instance->CCR1=arr * speed;
-		HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
-		HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_2);
+		htim4.Instance->CCR3=arr * speed;
+		HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
+		HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_4);
 	} else if (direction == 1) {
-		printf("hello 2");
-		htim4.Instance->CCR2=arr * speed * -1.0;
-		HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
-		HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_1);
+		htim4.Instance->CCR4=arr * speed * -1.0;
+		HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
+		HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_3);
 	}
 
 
@@ -237,7 +267,6 @@ int main(void)
   MX_USART2_UART_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
-  MX_I2C1_Init();
   MX_UART4_Init();
   MX_USART3_UART_Init();
   MX_TIM4_Init();
@@ -247,12 +276,12 @@ int main(void)
   DWT_Init();
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 
-  lcd1.hi2c = &hi2c1;
-  lcd1.address = 0x4E;
+//  lcd1.hi2c = &hi2c1;
+//  lcd1.address = 0x4E;
 
-  lcd_init(&lcd1);
+  //lcd_init(&lcd1);
   HAL_Delay(20);
-  lcd_clear(&lcd1);
+  //lcd_clear(&lcd1);
   HAL_Delay(5);
 
   HAL_UART_Receive_IT(&huart3, &rx_byte, 1);
@@ -265,7 +294,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-
+	  printf("\n\n--------------------------------------\r\n");
 	if (ENABLE_METAL_DETECTION == 1) {
 		int32_t diff = (int32_t)((int32_t)(storedTimeDelta - signalTimeDelta) * SENSITIVITY);
 
@@ -284,11 +313,13 @@ int main(void)
 		      }
 		      else
 		      {
-		        printf("Baseline: %lu us  |  Current: %lu us  |  Diff: %ld  |  Metal: %s\r\n",
-		          storedTimeDelta,
-		          signalTimeDelta,
-		          diff,
-		          diff > LED_THRESHOLD ? "YES" : "no");
+//		        printf("Baseline: %lu us  |  Current: %lu us  |  Diff: %ld  |  Metal: %s\r\n",
+//		          storedTimeDelta,
+//		          signalTimeDelta,
+//		          diff,
+//		          diff > LED_THRESHOLD ? "YES" : "no");
+
+		    	printf("Metal: %s\r\n", diff > LED_THRESHOLD ? "YES" : "no");
 
 		        if (diff > LED_THRESHOLD) {
 		        	playTone(261);
@@ -305,7 +336,8 @@ int main(void)
 		HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_SET);
 		DelayUS(10);
 		HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_RESET);
-		lcd_clear(&lcd1);
+		//lcd_clear(&lcd1);
+
 
 		uint32_t t0 = HAL_GetTick();
 		while (!echo_done && (HAL_GetTick() - t0 < 100));
@@ -315,14 +347,24 @@ int main(void)
 			char lcd_buf[17];
 			float distance = echo_pulse_us * 11.5 / 610.0;
 
-			snprintf(lcd_buf, sizeof(lcd_buf), "Distance = %.2f cm", distance);
-			printf("Pulse: " PRIu32 "\r\n", echo_pulse_us);
+			//snprintf(lcd_buf, sizeof(lcd_buf), "Distance = %.2f cm\r\n", distance);
+			//printf("Pulse: " PRIu32 "\r\n", echo_pulse_us);
 
-			printf(lcd_buf);
-			lcd_puts(&lcd1, lcd_buf);
+			// SEND VIA BLUETOOTH "distance" VARIBALE
+			printf("Distance = %.2f cm\r\n", distance);
+			if (ENABLE_BT_OBJ == 1) {
+				char buffer_o[25];
+				printf("Sending signal...\r\n");
+
+				int len = snprintf(buffer_o, sizeof(buffer_o), "Distance:%.2f\n", distance);
+				HAL_UART_Transmit(&huart3, (uint8_t *)buffer_o, len, HAL_MAX_DELAY);
+			}
+			//lcd_puts(&lcd1, lcd_buf);
+		} else {
+			printf("\n");
 		}
 
-		HAL_Delay(100);
+		//HAL_Delay(100);
 	}
 
 	if (TOGGLE_LED == 1) {
@@ -334,13 +376,15 @@ int main(void)
 		HAL_Delay(1000);
 		printf("Running tim3 and tim4 pwm gen.\r\n");
 
+		motor2(0, 1.0, 0);
+
 	}
 
-	if (ENABLE_BT == 1) {
+	if (ENABLE_BT_MOTOR == 1) {
 		if (line_ready)
 		{
 		    char local[24];
-		    int l, r;
+		    int l, r, q;
 
 		    __disable_irq();
 		    strncpy(local, rx_line, sizeof(local));
@@ -348,12 +392,25 @@ int main(void)
 		    line_ready = 0;
 		    __enable_irq();
 
-		    printf("RX: %s\r\n", local);
+		    //printf("RX: %s\r\n", local);
 
-		    if (sscanf(local, "L:%d,R:%d", &l, &r) == 2)
+		    if (sscanf(local, "L:%d,R:%d,HL:%d\n", &l, &r, &q) == 3)
 		    {
 		        bt_motorL = (int16_t)l;
 		        bt_motorR = (int16_t)r;
+		        bt_light = (int16_t)q;
+
+		        if (bt_light == 0) {
+
+		        	printf("Light: on\r\n");
+		        	HAL_GPIO_WritePin(LIGHT_PORT, LIGHT_PIN, GPIO_PIN_SET);
+		        } else if (bt_light == 1) {
+		        	printf("Light: off\r\n");
+		        	HAL_GPIO_WritePin(LIGHT_PORT, LIGHT_PIN, GPIO_PIN_RESET);
+		        }
+
+
+
 
 		        printf("Parsed -> L:%d R:%d\r\n", bt_motorL, bt_motorR);
 
@@ -438,40 +495,6 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-}
-
-/**
-  * @brief I2C1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_I2C1_Init(void)
-{
-
-  /* USER CODE BEGIN I2C1_Init 0 */
-
-  /* USER CODE END I2C1_Init 0 */
-
-  /* USER CODE BEGIN I2C1_Init 1 */
-
-  /* USER CODE END I2C1_Init 1 */
-  hi2c1.Instance = I2C1;
-  hi2c1.Init.ClockSpeed = 100000;
-  hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
-  hi2c1.Init.OwnAddress1 = 0;
-  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c1.Init.OwnAddress2 = 0;
-  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN I2C1_Init 2 */
-
-  /* USER CODE END I2C1_Init 2 */
-
 }
 
 /**
@@ -612,7 +635,6 @@ static void MX_TIM4_Init(void)
 
   /* USER CODE END TIM4_Init 0 */
 
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
   TIM_OC_InitTypeDef sConfigOC = {0};
 
@@ -625,15 +647,6 @@ static void MX_TIM4_Init(void)
   htim4.Init.Period = 65535;
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
   if (HAL_TIM_PWM_Init(&htim4) != HAL_OK)
   {
     Error_Handler();
@@ -653,6 +666,14 @@ static void MX_TIM4_Init(void)
     Error_Handler();
   }
   if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
   {
     Error_Handler();
   }
@@ -785,7 +806,7 @@ static void MX_GPIO_Init(void)
                           |GPIO_PIN_7|GPIO_PIN_9, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, LD2_Pin|GPIO_PIN_12, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1|GPIO_PIN_2, GPIO_PIN_RESET);
@@ -811,12 +832,18 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : LD2_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin;
+  /*Configure GPIO pins : LD2_Pin PA12 */
+  GPIO_InitStruct.Pin = LD2_Pin|GPIO_PIN_12;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB0 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PB1 PB2 */
   GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_2;
@@ -861,9 +888,11 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-// Fires on every rising edge from oscillator on PA0
+// Fires on every rising edge from oscillator on PB0
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
+
+// Interrupt for Metal Detection
   if (GPIO_Pin == OSCILLATOR_PIN)
   {
     interruptCount++;
@@ -890,6 +919,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   }
 
 
+  // Interrupt for Object Detection
   if (GPIO_Pin == ECHO_PIN)   // PA1 = ECHO
   {
 
