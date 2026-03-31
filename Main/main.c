@@ -36,9 +36,11 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
+TIM_HandleTypeDef htim5;
 
 UART_HandleTypeDef huart4;
 UART_HandleTypeDef huart2;
@@ -55,8 +57,8 @@ volatile uint32_t interruptCount  = 0;
 
 uint32_t lastPrintTime = 0;
 
-volatile uint16_t echo_rise_time = 0;
-volatile uint16_t echo_pulse_us = 0;
+volatile uint32_t echo_rise_time = 0;
+volatile uint32_t echo_pulse_us = 0;
 volatile uint8_t echo_waiting_for_fall = 0;
 volatile uint8_t echo_done = 0;
 
@@ -82,6 +84,8 @@ static void MX_TIM3_Init(void);
 static void MX_UART4_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_TIM4_Init(void);
+static void MX_TIM1_Init(void);
+static void MX_TIM5_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -116,12 +120,6 @@ static uint32_t micros(void)
 //    lcd1.address = 0x4E;    // I2C address for the first LCD
 //    lcd_init(&lcd1);        // Initialize the first LCD
 //}
-
-void DelayUS(uint16_t us)
-{
-    uint16_t start = __HAL_TIM_GET_COUNTER(&htim3);
-    while ((uint16_t)(__HAL_TIM_GET_COUNTER(&htim3) - start) < us) {}
-}
 
 // 				DEBUGGING FUNCTIONS
 //---------------------------------------------------------
@@ -167,9 +165,6 @@ void Send_Value(int16_t value)
 
 
 
-
-
-// MAKE SURE TO RECONFIG DELAY FUNCTION ABOVE TO A DIFFERENT TIM CHANNEL; WE ARE CHANGING ARR + CRR BELOW
 void motor1(int set, float speed, int direction)
 {
 	// PSC = 83, F_CLK = 84,000,000
@@ -229,8 +224,8 @@ void motor2(int set, float speed, int direction)
 
 void stopMotor2(void)
 {
-  HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_1);
-  HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_2);
+  HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_3);
+  HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_4);
 }
 
 /* USER CODE END 0 */
@@ -270,11 +265,14 @@ int main(void)
   MX_UART4_Init();
   MX_USART3_UART_Init();
   MX_TIM4_Init();
+  MX_TIM1_Init();
+  MX_TIM5_Init();
   /* USER CODE BEGIN 2 */
 
 
   DWT_Init();
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+  HAL_TIM_Base_Start(&htim1);
 
 //  lcd1.hi2c = &hi2c1;
 //  lcd1.address = 0x4E;
@@ -322,19 +320,23 @@ int main(void)
 		    	printf("Metal: %s\r\n", diff > LED_THRESHOLD ? "YES" : "no");
 
 		        if (diff > LED_THRESHOLD) {
-		        	playTone(261);
+		        	playTone(500);
 		        } else {
 		        	stopTone();
 		        }
 		      }
 		    }
+		    HAL_Delay(100);
 	}
 
 	if (ENABLE_OBJ_DETECTION == 1) {
 		HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_RESET);
-		DelayUS(2);
+		micros();
+		micros();
 		HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_SET);
-		DelayUS(10);
+
+		for (int i = 0 ; i < 10; i++) { micros();}
+
 		HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_RESET);
 		//lcd_clear(&lcd1);
 
@@ -347,16 +349,18 @@ int main(void)
 			char lcd_buf[17];
 			float distance = echo_pulse_us * 11.5 / 610.0;
 
+			int rounded = distance * 100 / 1;
+
 			//snprintf(lcd_buf, sizeof(lcd_buf), "Distance = %.2f cm\r\n", distance);
 			//printf("Pulse: " PRIu32 "\r\n", echo_pulse_us);
 
 			// SEND VIA BLUETOOTH "distance" VARIBALE
-			printf("Distance = %.2f cm\r\n", distance);
+			printf("Distance = %.2f cm, Rounded = %d cm\r\n", distance, rounded);
 			if (ENABLE_BT_OBJ == 1) {
 				char buffer_o[25];
 				printf("Sending signal...\r\n");
 
-				int len = snprintf(buffer_o, sizeof(buffer_o), "Distance:%.2f\n", distance);
+				int len = snprintf(buffer_o, sizeof(buffer_o), "%d\n", rounded);
 				HAL_UART_Transmit(&huart3, (uint8_t *)buffer_o, len, HAL_MAX_DELAY);
 			}
 			//lcd_puts(&lcd1, lcd_buf);
@@ -373,11 +377,12 @@ int main(void)
 	}
 
 	if (ENABLE_MOTOR_SIGNAL == 1) {
-		HAL_Delay(1000);
 		printf("Running tim3 and tim4 pwm gen.\r\n");
-
+		motor1(0, 1.0, 0);
 		motor2(0, 1.0, 0);
-
+		HAL_Delay(1-00);
+		stopMotor1();
+		stopMotor2();
 	}
 
 	if (ENABLE_BT_MOTOR == 1) {
@@ -439,6 +444,7 @@ int main(void)
 		        printf("Bad packet: %s\r\n", local);
 		    }
 		}
+		HAL_Delay(100);
 	}
 
 
@@ -495,6 +501,52 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief TIM1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM1_Init(void)
+{
+
+  /* USER CODE BEGIN TIM1_Init 0 */
+
+  /* USER CODE END TIM1_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM1_Init 1 */
+
+  /* USER CODE END TIM1_Init 1 */
+  htim1.Instance = TIM1;
+  htim1.Init.Prescaler = 83;
+  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim1.Init.Period = 65535;
+  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim1.Init.RepetitionCounter = 0;
+  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM1_Init 2 */
+
+  /* USER CODE END TIM1_Init 2 */
+
 }
 
 /**
@@ -685,6 +737,51 @@ static void MX_TIM4_Init(void)
 }
 
 /**
+  * @brief TIM5 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM5_Init(void)
+{
+
+  /* USER CODE BEGIN TIM5_Init 0 */
+
+  /* USER CODE END TIM5_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM5_Init 1 */
+
+  /* USER CODE END TIM5_Init 1 */
+  htim5.Instance = TIM5;
+  htim5.Init.Prescaler = 83;
+  htim5.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim5.Init.Period = 65535;
+  htim5.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim5.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim5) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim5, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim5, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM5_Init 2 */
+
+  /* USER CODE END TIM5_Init 2 */
+
+}
+
+/**
   * @brief UART4 Initialization Function
   * @param None
   * @retval None
@@ -852,14 +949,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PB15 */
-  GPIO_InitStruct.Pin = GPIO_PIN_15;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  GPIO_InitStruct.Alternate = GPIO_AF1_TIM1;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
   /*Configure GPIO pin : PA8 */
   GPIO_InitStruct.Pin = GPIO_PIN_8;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
@@ -925,12 +1014,12 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 	  if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_1) == GPIO_PIN_SET)
 	  {
-		  echo_rise_time = TIM3->CNT;
+		  echo_rise_time = TIM1->CNT;
 		  echo_waiting_for_fall = 1;
 	  }
 	  else if (echo_waiting_for_fall)
 	  {
-		  echo_pulse_us = (uint16_t)(TIM3->CNT - echo_rise_time);
+		  echo_pulse_us = (uint16_t)(TIM1->CNT - echo_rise_time);
 		  echo_waiting_for_fall = 0;
 		  echo_done = 1;
 	  }
