@@ -10,6 +10,7 @@ This project uses an STM32 microcontroller to control **two DC motors**, communi
 - **Bluetooth serial communication (HC-05, slave mode)** using USART TX/RX
 - **Metal detection sensing** using an ADC input and a GPIO output
 - **Object detection sensing** using microsecond-resolution pulses
+- **Noise and light generation**
 
 <br>
 
